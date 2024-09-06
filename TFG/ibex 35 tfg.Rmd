@@ -1,0 +1,241 @@
+---
+title: "IBEX"
+author: "Pere Planas Masriera"
+date: "2024-09-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r}
+diFf2<-getSymbols(c("TEF.MC","SAN.MC","FER.MC","ROVI.MC","IBE.MC"), from="2021-01-01",to="2023-12-31")
+```
+
+
+
+RENDIBILITATS
+```{r}
+rent_TEF <- diff(TEF.MC[, 4], 20) / lag(x = TEF.MC[, 4], n = 20)[-c(1:20)]
+rent_SAN <- diff(SAN.MC[, 4], 20) / lag(x = SAN.MC[, 4], n = 20)[-c(1:20)]
+rent_FER <- diff(FER.MC[, 4], 20) / lag(x = FER.MC[, 4], n = 20)[-c(1:20)]
+rent_ROVI <- diff(ROVI.MC[, 4], 20) / lag(x = ROVI.MC[, 4], n = 20)[-c(1:20)]
+rent_IBE <- diff(IBE.MC[, 4], 20) / lag(x = IBE.MC[, 4], n = 20)[-c(1:20)]
+
+rent2<-data.frame(TEF=rent_TEF,SAN=rent_SAN,FER=rent_FER,ROVI=rent_ROVI,IBE=rent_IBE)
+head(rent2)
+summary(rent2)
+
+```
+
+
+```{r}
+Risc2 <- apply(rent2, MARGIN = 2, FUN = sd)
+Mitjana2 <- apply(rent2, MARGIN = 2, FUN = mean)
+empreses2 <- c("TEF","SAN","FER","ROVI","IBE")
+colnames(rent2)<-empreses2
+taula2 <- data.frame(Mitjana2, Risc2,
+                    row.names = empreses2)
+#taula ordenada de més gran a més baixa per rendibilitat
+taula_ordenada_mitjana2 <- taula2[(order(taula2$Mitjana2, decreasing = TRUE)), ]
+taula_ordenada_mitjana2
+```
+Principals observacions:
+
+No el que té més risc, és el que té major rendibilitat, grafiquem aquesta taula:
+```{r}
+slope <- 0.07
+intercept <- 0.02 - min(taula2$Risc2) * slope
+
+ggplot(taula2, aes(x = Risc2, y = Mitjana2, label = rownames(taula2))) + 
+  geom_point(shape = 1:5, size = 3, color = 1:5) +
+  geom_text(vjust = 0.5, hjust = -0.3) + 
+  xlim(0.04,0.1) + 
+  labs(
+       x = "Risc",
+       y = "Rendibilitat mitjana") +
+  theme_minimal()
+```
+
+```{r}
+generate_heat_map <- function(corr, title)
+{
+
+  heatmap.2(x = corr,    
+            cellnote = corr,   
+            main = title,           
+            symm = TRUE,            
+            dendrogram="none",      
+            Rowv = FALSE,           
+            trace="none",           
+            density.info="none",        
+            notecol="black")          
+}
+corr2<-round(cor(rent2),2)
+generate_heat_map(corr2,"Correlacions")
+```
+
+
+CARTERA 1 
+# CARTERA TANGENT AMB L'ACTIU SENSE RISC
+
+```{r}
+Spec2 <- portfolioSpec()
+  setRiskFreeRate(Spec2)<- 0.038/12
+
+Spec2
+```
+
+
+
+```{r, echo = FALSE, warning= FALSE}
+frontera2 <- portfolioFrontier(as.timeSeries(rent2), spec = Spec2)
+frontierPlot(frontera2)
+grid()
+equalWeightsPoints(frontera2, pch = 19, col = "orange", cex = 2)
+monteCarloPoints(frontera2, mcSteps = 5000, col = "green", cex = 0.05)
+twoAssetsLines(frontera2, col = "red", lwd = 2)
+```
+
+
+```{r, echo = FALSE}
+tailoredFrontierPlot(frontera2)
+
+```
+
+```{r}
+col2<- qualiPalette(ncol(rent2), "Dark2")
+weightsPlot(frontera2, col2=col2)
+```
+
+```{r}
+efPortfolio2 <- tangencyPortfolio(as.timeSeries(rent2),
+                                 spec = Spec2)
+efPortfolio2
+```
+
+```{r, echo = FALSE}
+p2<-as.data.frame(getWeights(efPortfolio2))
+
+cartera2<-rent_TEF*p2["TEF",] + rent_SAN*p2["SAN",] + rent_FER*p2["FER",] + rent_ROVI*p2["ROVI",] + rent_IBE*p2["IBE",]  
+colnames(cartera2)<-"Rend"
+preu2<-TEF.MC[,4]*p2["TEF",] + SAN.MC[,4]*p2["SAN",] +FER.MC[,4]*p2["FER",] +IBE.MC[,4]*p2["IBE",] +ROVI.MC[,4]*p2["ROVI",] 
+colnames(preu2)<-"Valor"
+
+i_P2<-preu2/as.numeric(preu2[1,1])
+ggplot(i_P2, aes(x = index(preu2), y = coredata(i_P2))) +
+  geom_line(color = "Black", size = 1) + 
+  labs(
+       x = "Data",
+       y = "Valor de la Cartera") +
+  theme_minimal()
+#rentabilitat total
+round(100*as.numeric(i_P2[length(cartera2), "Valor"])/as.numeric(i_P2[1, "Valor"]) - 100, 2)
+#ANUAL
+round(((100*as.numeric(i_P2[length(cartera2), "Valor"])/as.numeric(i_P2[1, "Valor"])/100)^(1/(2024-2021)) * 100 - 100), 2)
+```
+
+
+```{r}
+df_cartera_2 <- data.frame(date = index(cartera2), cartera = coredata(cartera2))
+
+
+ggplot(df_cartera_2, aes(x = index(cartera2), y = coredata(cartera2))) +
+  geom_line(color = "black", size = 1) + 
+  labs(
+       x = "Data",
+       y = "Valor de la cartera") +
+  theme_minimal()
+sd(cartera2)
+
+```
+
+
+Cartera de mínim risc
+```{r}
+efPortfolio21 <- minvariancePortfolio(as.timeSeries(rent2, spec = Spec2))
+min_weights21 <- getWeights(efPortfolio21)
+min_weights21
+```
+Creem la cartera
+```{r}
+p21<-as.data.frame(getWeights(efPortfolio21))
+cartera21<-rent_TEF*p21["TEF",] + rent_SAN*p21["SAN",] + rent_FER*p21["FER",] + rent_ROVI*p21["ROVI",] + rent_IBE*p21["IBE",]  
+colnames(cartera21)<-"Rend"
+preu21<-TEF.MC[,4]*p21["TEF",] + SAN.MC[,4]*p21["SAN",] +FER.MC[,4]*p21["FER",] +IBE.MC[,4]*p21["IBE",] +ROVI.MC[,4]*p21["ROVI",] 
+colnames(preu21)<-"Valor"
+
+i_P21<-preu21/as.numeric(preu21[1,1])
+ggplot(i_P21, aes(x = index(preu21), y = coredata(i_P21))) +
+  geom_line(color = "Black", size = 1) + 
+  labs(
+       x = "Data",
+       y = "Valor de la Cartera") +
+  theme_minimal()
+
+```
+
+```{r}
+#rentabilitat total
+round(100*as.numeric(i_P21[length(cartera21), "Valor"])/as.numeric(i_P21[1, "Valor"]) - 100, 2)
+#ANUAL
+round(((100*as.numeric(i_P21[length(cartera2), "Valor"])/as.numeric(i_P21[1, "Valor"])/100)^(1/(2024-2021)) * 100 - 100), 2)
+```
+```{r}
+df_cartera_21 <- data.frame(date = index(cartera2), cartera = coredata(cartera2))
+
+
+ggplot(df_cartera_21, aes(x = index(cartera21), y = coredata(cartera2))) +
+  geom_line(color = "black", size = 1) + 
+  labs(
+       x = "Data",
+       y = "Valor de la cartera") +
+  theme_minimal()
+sd(cartera2)
+```
+
+
+
+Cartera de minimitzar el risc amb restriccions:
+
+```{r}
+Constrain <- c("maxW[c(1,2,3,4,5)] = c(0.33,0.33,0.33,0.33,0.33)", "minW[c(1,2,3,4,5)] = c(0.05,0.05,0.05,0.05,0.05)", "sumW = 1")
+efPortfolio22 <- minvariancePortfolio(as.timeSeries(rent2), spec = Spec2, Constrain)
+```
+
+Creem la cartera
+```{r}
+p22<-as.data.frame(getWeights(efPortfolio22))
+cartera22<-rent_TEF*p22["TEF",] + rent_SAN*p22["SAN",] + rent_FER*p22["FER",] + rent_ROVI*p22["ROVI",] + rent_IBE*p22["IBE",]  
+colnames(cartera22)<-"Rend"
+preu22<-TEF.MC[,4]*p22["TEF",] + SAN.MC[,4]*p22["SAN",] +FER.MC[,4]*p22["FER",] +IBE.MC[,4]*p22["IBE",] +ROVI.MC[,4]*p22["ROVI",] 
+colnames(preu22)<-"Valor"
+
+i_P22<-preu22/as.numeric(preu22[1,1])
+ggplot(i_P22, aes(x = index(preu22), y = coredata(i_P22))) +
+  geom_line(color = "Black", size = 1) + 
+  labs(
+       x = "Data",
+       y = "Valor de la Cartera") +
+  theme_minimal()
+
+```
+
+```{r}
+#rentabilitat total
+round(100*as.numeric(i_P22[length(cartera22), "Valor"])/as.numeric(i_P22[1, "Valor"]) - 100, 2)
+#ANUAL
+round(((100*as.numeric(i_P22[length(cartera2), "Valor"])/as.numeric(i_P22[1, "Valor"])/100)^(1/(2024-2021)) * 100 - 100), 2)
+```
+```{r}
+df_cartera_22 <- data.frame(date = index(cartera2), cartera = coredata(cartera2))
+
+
+ggplot(df_cartera_22, aes(x = index(cartera22), y = coredata(cartera2))) +
+  geom_line(color = "black", size = 1) + 
+  labs(
+       x = "Data",
+       y = "Valor de la cartera") +
+  theme_minimal()
+
+```

@@ -1,0 +1,287 @@
+---
+title: "TFG"
+author: "Pere Planas Masriera"
+date: "2024-09-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Primer carregeuem totes le llibreries que necessitarem:
+
+```{r}
+packages <- c('tseries', 'knitr', 'kableExtra', 'fPortfolio', 'timeSeries', 'quantmod', 'dplyr', 'PerformanceAnalytics', 'ggplot2', 'dplyr', 'MarkowitzR','gplots')
+
+installed_packages <- packages %in% rownames(installed.packages())
+if (any(installed_packages == FALSE)) {
+  install.packages(packages[!installed_packages])
+}
+
+invisible(lapply(packages, library, character.only = TRUE))
+```
+
+```{r, include = FALSE, echo = FALSE, warning = FALSE}
+library(DEoptim)
+library(dplyr)
+library(e1071)
+library(fPortfolio)
+library(ggplot2)
+library(kableExtra)
+library(knitr)
+library(MTS)
+library(PerformanceAnalytics)
+library(plotly)
+library(quantmod)
+library(quadprog)
+library(ROI)
+library(tinytex)
+library(TTR)
+library(tseries)
+library(gridExtra)
+library(fGarch)
+```
+
+Obtenim les dades:
+```{r}
+diFf<-getSymbols(c("JNJ","MSFT","JPM","GE","AMT"), from="2021-01-01",to="2023-12-31")
+```
+
+```{r}
+head(JNJ)
+```
+
+RENDIBILITATS
+```{r}
+rent_AMT <- diff(AMT[, 4], 20) / lag(x = AMT[, 4], n = 20)[-c(1:20)]
+rent_GE <- diff(GE[, 4], 20) / lag(x = GE[, 4], n = 20)[-c(1:20)]
+rent_JNJ <- diff(JNJ[, 4], 20) / lag(x = JNJ[, 4], n = 20)[-c(1:20)]
+rent_JPM <- diff(JPM[, 4], 20) / lag(x = +JPM[, 4], n = 20)[-c(1:20)]
+rent_MSFT <- diff(MSFT[, 4], 20) / lag(x = MSFT[, 4], n = 20)[-c(1:20)]
+
+rent1<-data.frame(AMT=rent_AMT,GE=rent_GE,JNJ=rent_JNJ,JPM=rent_JPM,MSFT=rent_MSFT)
+head(rent1)
+summary(rent1)
+
+```
+
+
+```{r}
+Risc1 <- apply(rent1, MARGIN = 2, FUN = sd)
+Mitjana1 <- apply(rent1, MARGIN = 2, FUN = mean)
+empreses1 <- c("JNJ","MSFT","JPM","GE","AMT")
+colnames(rent1)<-empreses1
+taula1 <- data.frame(Mitjana1, Risc1,
+                    row.names = empreses1)
+#taula ordenada de més gran a més baixa per rendibilitat
+taula_ordenada_mitjana1 <- taula1[(order(taula1$Mitjana1, decreasing = TRUE)), ]
+taula_ordenada_mitjana1
+```
+Principals observacions:
+
+No el que té més risc, és el que té major rendibilitat, grafiquem aquesta taula:
+```{r}
+slope <- 0.07
+intercept <- 0.02 - min(taula1$Risc1) * slope
+
+ggplot(taula1, aes(x = Risc1, y = Mitjana1, label = rownames(taula1))) + 
+  geom_point(shape = 1:5, size = 3, color = 1:5) +
+  geom_text(vjust = 0.5, hjust = -0.3) + 
+  xlim(0.04,0.1) + 
+  labs(
+       x = "Risc",
+       y = "Rendibilitat mitjana") +
+  theme_minimal()
+```
+```{r}
+generate_heat_map <- function(corr, title)
+{
+
+  heatmap.2(x = corr,    
+            cellnote = corr,   
+            main = title,           
+            symm = TRUE,            
+            dendrogram="none",      
+            Rowv = FALSE,           
+            trace="none",           
+            density.info="none",        
+            notecol="black")          
+}
+corr1<-round(cor(rent1),2)
+generate_heat_map(corr1,"Correlacions")
+```
+
+
+
+
+
+
+
+
+
+
+COMENCEM AMB LA CONSTRUCCIÓ DE LES CARTERES D'INVERSIÓ
+# CARTERA TANGENT AMB L'ACTIU SENSE RISC
+
+```{r}
+Spec1 <- portfolioSpec()
+  setRiskFreeRate(Spec1)<- 0.038/12
+
+Spec1
+```
+
+
+
+```{r, echo = FALSE, warning= FALSE}
+frontera1 <- portfolioFrontier(as.timeSeries(rent1), spec = Spec1)
+frontierPlot(frontera1)
+grid()
+equalWeightsPoints(frontera1, pch = 19, col = "orange", cex = 2)
+monteCarloPoints(frontera1, mcSteps = 5000, col = "green", cex = 0.05)
+twoAssetsLines(frontera1, col = "red", lwd = 2)
+```
+
+
+```{r, echo = FALSE}
+tailoredFrontierPlot(frontera1)
+
+```
+
+```{r}
+col1 <- qualiPalette(ncol(rent1), "Dark2")
+weightsPlot(frontera1, col1=col1)
+```
+
+```{r}
+efPortfolio <- tangencyPortfolio(as.timeSeries(rent1),
+                                 spec = Spec1)
+efPortfolio
+```
+
+```{r, echo = FALSE}
+p1<-as.data.frame(getWeights(efPortfolio))
+
+cartera1<-rent_JNJ*p1["JNJ",] + rent_MSFT*p1["MSFT",] + rent_JPM*p1["JPM",] + rent_GE*p1["GE",] + rent_AMT*p1["AMT",]  
+colnames(cartera1)<-"Rend"
+preu1<-JNJ[,4]*p1["JNJ",] + MSFT[,4]*p1["MSFT",] +JPM[,4]*p1["JPM",] +GE[,4]*p1["GE",] +AMT[,4]*p1["AMT",] 
+colnames(preu1)<-"Valor"
+
+i_P1<-preu1/as.numeric(preu1[1,1])
+ggplot(i_P1, aes(x = index(preu1), y = coredata(i_P1))) +
+  geom_line(color = "Black", size = 1) + 
+  labs(
+       x = "Data",
+       y = "Valor de la Cartera") +
+  theme_minimal()
+#rentabilitat total
+round(100*as.numeric(i_P1[length(cartera1), "Valor"])/as.numeric(i_P1[1, "Valor"]) - 100, 2)
+head(i_P1)
+#mensual
+round(((100*as.numeric(i_P1[length(cartera1), "Valor"])/as.numeric(i_P1[1, "Valor"])/100)^(1/(2024-2021)) * 100 - 100), 2)
+```
+
+
+```{r}
+df_cartera_1 <- data.frame(date = index(cartera1), cartera = coredata(cartera1))
+
+
+ggplot(df_cartera_1, aes(x = index(cartera1), y = coredata(cartera1))) +
+  geom_line(color = "black", size = 1) + 
+  labs(
+       x = "Data",
+       y = "Valor de la cartera") +
+  theme_minimal()
+
+sd(cartera1)
+
+```
+
+# CARTERA DE MINIMITZAR RISCOS
+```{r}
+efPortfolio12 <- minvariancePortfolio(as.timeSeries(rent1, spec = Spec1))
+min_weights12 <- getWeights(efPortfolio12)
+
+min_weights12 
+```
+
+```{r}
+p12<-as.data.frame(getWeights(efPortfolio12))
+
+cartera12<-rent_JNJ*p12["JNJ",] + rent_MSFT*p12["MSFT",] + rent_JPM*p12["JPM",] + rent_GE*p12["GE",] + rent_AMT*p12["AMT",]  
+colnames(cartera12)<-"Rend"
+sd(cartera12)
+preu12<-JNJ[,4]*p12["JNJ",] + MSFT[,4]*p12["MSFT",] +JPM[,4]*p12["JPM",] +GE[,4]*p12["GE",] +AMT[,4]*p12["AMT",] 
+colnames(preu12)<-"Valor"
+i_P12<-preu12/as.numeric(preu12[1,1])
+
+df_cartera_12 <- data.frame(date = index(preu12), cartera = coredata(i_P12))
+ggplot(i_P12, aes(x = index(preu12), y = coredata(i_P12))) +
+  geom_line(color = "Black", size = 1) +
+  labs(
+       x = "Data",
+       y = "Valor de la Cartera") +
+  theme_minimal()
+#rentabilitat total
+round(100*as.numeric(i_P12[length(cartera12), "Valor"])/as.numeric(i_P12[1, "Valor"]) - 100, 2)
+#ANUAL
+round(((100*as.numeric(i_P12[length(cartera12), "Valor"])/as.numeric(i_P12[1, "Valor"])/100)^(1/(2024-2021)) * 100 - 100), 2)
+```
+
+```{r}
+df_precio_12 <- data.frame(date = index(cartera12), cartera = coredata(cartera12))
+
+ggplot(df_precio_12, aes(x = index(cartera12), y = coredata(cartera12))) +
+  geom_line(color = "Black", size = 1) +
+  labs(title = "",
+       x = "Data",
+       y = "Valor de la Cartera") +
+  theme_minimal()
+
+
+```
+```{r}
+Constrain <- c("maxW[c(1,2,3,4,5)] = c(0.33,0.33,0.33,0.33,0.33)", "minW[c(1,2,3,4,5)] = c(0.05,0.05,0.05,0.05,0.05)", "sumW = 1")
+efPortfolio13 <- minvariancePortfolio(as.timeSeries(rent1), spec = Spec1, Constrain)
+efPortfolio13
+```
+
+
+
+
+```{r}
+p13<-as.data.frame(getWeights(efPortfolio13))
+
+cartera13<-rent_JNJ*p13["JNJ",] + rent_MSFT*p13["MSFT",] + rent_JPM*p13["JPM",] + rent_GE*p13["GE",] + rent_AMT*p13["AMT",]  
+colnames(cartera13)<-"Rend"
+sd(cartera13)
+preu13<-JNJ[,4]*p13["JNJ",] + MSFT[,4]*p13["MSFT",] +JPM[,4]*p13["JPM",] +GE[,4]*p13["GE",] +AMT[,4]*p13["AMT",] 
+colnames(preu13)<-"Valor"
+i_P13<-preu13/as.numeric(preu13[1,1])
+
+df_cartera_13 <- data.frame(date = index(preu13), cartera = coredata(i_P13))
+ggplot(i_P13, aes(x = index(preu13), y = coredata(i_P13))) +
+  geom_line(color = "Black", size = 1) +
+  labs(
+       x = "Data",
+       y = "Valor de la Cartera") +
+  theme_minimal()
+#rentabilitat total
+round(100*as.numeric(i_P13[length(cartera13), "Valor"])/as.numeric(i_P13[1, "Valor"]) - 100, 2)
+#ANUAL
+round(((100*as.numeric(i_P13[length(cartera13), "Valor"])/as.numeric(i_P13[1, "Valor"])/100)^(1/(2024-2021)) * 100 - 100), 2)
+```
+
+```{r}
+df_precio_13 <- data.frame(date = index(cartera13), cartera = coredata(cartera13))
+
+ggplot(df_precio_13, aes(x = index(cartera13), y = coredata(cartera13))) +
+  geom_line(color = "Black", size = 1) +
+  labs(title = "",
+       x = "Data",
+       y = "Valor de la Cartera") +
+  theme_minimal()
+sd(cartera13)
+```
+
+
